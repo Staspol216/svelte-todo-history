@@ -1,40 +1,34 @@
 <script lang="ts">
-	import { CHANGE_REASON, type UndoRedoStatus } from '$lib/undo/UndoManager';
+	import { UndoManager } from '$lib/undo/UndoManager';
+	import { onMount } from 'svelte';
 
-	export let canUndoRedo: UndoRedoStatus;
-	export let onUndo: () => void;
-	export let onRedo: () => void;
-	let undoButtonRef: HTMLElement, redoButtonRef: HTMLElement;
-	$: if (
-		canUndoRedo.canUndo &&
-		canUndoRedo.canUndoChangeReason !== CHANGE_REASON.Undo &&
-		canUndoRedo.canUndoChangeReason !== CHANGE_REASON.NoChange
-	) {
-		undoButtonRef.classList.remove('shrink');
-		window.requestAnimationFrame(() => undoButtonRef?.classList.add('shrink'));
-	}
-	$: if (
-		canUndoRedo.canRedo &&
-		canUndoRedo.canRedoChangeReason !== CHANGE_REASON.Redo &&
-		canUndoRedo.canRedoChangeReason !== CHANGE_REASON.NoChange
-	) {
-		redoButtonRef.classList.remove('shrink');
-		window.requestAnimationFrame(() => redoButtonRef?.classList.add('shrink'));
-	}
+	export let undoRedoManager: UndoManager;
+
+	let canUndoRedo = undoRedoManager.getUndoRedoStatus();
+	console.log(canUndoRedo);
+
+	onMount(() => {
+		const undoUnsubscribe = undoRedoManager.subscribeToCanUndoRedoChange((newStatus) => {
+			console.log('undoRedo sub fired', { ...newStatus });
+			canUndoRedo = newStatus;
+		});
+
+		return () => {
+			undoUnsubscribe();
+		};
+	});
 </script>
 
 <section class="undo-redo-bar">
 	<button
-		bind:this={undoButtonRef}
-		on:click={onUndo}
+		on:click={undoRedoManager.undo}
 		title={canUndoRedo.canUndo ? canUndoRedo.canUndo : ''}
 		disabled={!canUndoRedo.canUndo}
 	>
 		<img src="/undo.svg" alt="Undo Icon" />
 	</button>
 	<button
-		bind:this={redoButtonRef}
-		on:click={onRedo}
+		on:click={undoRedoManager.redo}
 		title={canUndoRedo.canRedo ? canUndoRedo.canRedo : ''}
 		disabled={!canUndoRedo.canRedo}
 	>
@@ -57,20 +51,5 @@
 	}
 	.undo-redo-bar button:disabled {
 		opacity: 0.3;
-	}
-	:global(.shrink) {
-		animation: shrink 0.5s ease-out forwards;
-	}
-
-	@keyframes shrink {
-		0% {
-			transform: scale(1);
-		}
-		50% {
-			transform: scale(0.9);
-		}
-		100% {
-			transform: scale(1);
-		}
 	}
 </style>

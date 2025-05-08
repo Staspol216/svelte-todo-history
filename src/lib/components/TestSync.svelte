@@ -1,14 +1,13 @@
 <script lang="ts">
-	import type { UndoEntry } from '$lib/undo/UndoManager';
+	import type { UndoManager } from '$lib/undo/UndoManager';
 
-	export let doOp: (entry: UndoEntry) => void;
-	export let updateCanUndoRedoStatus: () => void;
+	export let undoRedoManager: UndoManager;
 
 	let count = 0;
 	const getCurrentCount = () => count;
 	function handleClick() {
 		const frozenCount = count;
-		doOp({
+		undoRedoManager.do({
 			scopeName: 'increaseCount',
 			description: 'increase counter',
 			reverseDescription: 'decrease counter',
@@ -17,7 +16,6 @@
 			hasUndoConflict: () => {
 				return frozenCount + 1 !== getCurrentCount();
 			},
-
 			hasRedoConflict: () => {
 				return frozenCount !== getCurrentCount();
 			}
@@ -33,7 +31,7 @@
 	<button
 		on:click={() => {
 			count = count + 1;
-			updateCanUndoRedoStatus();
+			undoRedoManager.updateCanUndoRedoStatus();
 		}}
 		>Simulate external increase (conflict)
 	</button>

@@ -1,7 +1,7 @@
 type ResRej = (value: unknown) => void;
 
 type Queueable = {
-	operation: () => any;
+	operation: () => unknown;
 	resolvers: { resolve: ResRej; reject: ResRej };
 };
 
@@ -29,8 +29,7 @@ export function serialAsyncExecutor() {
 		isWorking = false;
 	}
 	return {
-		execute(operation: () => any) {
-			let resolve: ResRej, reject: ResRej;
+		execute(operation: () => unknown) {
 			return new Promise((resolve, reject) => {
 				_queue.push({ operation, resolvers: { resolve, reject } });
 				if (!isWorking) pullFromQueue();

@@ -17,24 +17,23 @@
 
 	const { spaceID } = $page.params;
 	let replicacheInstance: Replicache<M>;
-	let _list: Todo[] = [];
+	let todos: Todo[] = [];
 	let areAllChangesSaved = true;
 	let mySessionId = '';
 	const undoRedoManager = new UndoManager();
-	let canUndoRedo = undoRedoManager.getUndoRedoStatus();
 
 	/* Doing this because replicache doesn't expose info about whether incoming changes are self-inflicted or external */
-	$: knownItemIds = _list.map((item) => item.id);
+	$: knownItemIds = todos.map((todo) => todo.id);
 	function updateTodoUndoStatusOnExternalChanges(data: Todo[]) {
 		// Without this filtering, it would call it twice on every change, including changes in the current session, which can mess the change reason field
-		const listBefore = [..._list];
-		const updatedByAnotherBefore = _list.filter((item) => item.updatedBy !== mySessionId);
+		const listBefore = [...todos];
+		const updatedByAnotherBefore = todos.filter((todo) => todo.updatedBy !== mySessionId);
 		const updatedByAnotherNow = data.filter((item) => item.updatedBy !== mySessionId);
 
 		if (
 			knownItemIds.find((id) => !data.find((item) => item.id === id)) || // an item was deleted by another session
 			updatedByAnotherNow.filter((item) => {
-				const prevMe = listBefore.find((prevItem) => prevItem.id === item.id);
+				const prevMe = listBefore.find((todo) => todo.id === item.id);
 				if (!prevMe) return false; // new item
 				const prevOther = updatedByAnotherBefore.find((prevItem) => prevItem.id === item.id);
 				if (prevMe && !prevOther) return true; // an existing item that was updated by someone else now
@@ -60,24 +59,20 @@
 	/*************************************/
 
 	onMount(() => {
-		const undoUnsubscribe = undoRedoManager.subscribeToCanUndoRedoChange((newStatus) => {
-			console.log('undoRedo sub fired', { ...newStatus });
-			canUndoRedo = newStatus;
-		});
 		replicacheInstance = initReplicache(spaceID);
 		mySessionId = replicacheInstance.clientID;
 		replicacheInstance.subscribe(listTodos, (data) => {
 			if (!updateTodoUndoStatusOnExternalChanges(data)) {
 				updateCanUndoRedoStatusOnServerOverridingOurChanges(data);
 			}
-			_list = data;
-			_list.sort((a: Todo, b: Todo) => a.sort - b.sort);
+			todos = data;
+			todos.sort((a: Todo, b: Todo) => a.sort - b.sort);
 		});
 		// Implements a Replicache poke using Server-Sent Events.
 		// If a "poke" message is received, it will pull from the server.
 		const connection = source(`/api/replicache/${spaceID}/poke`);
 		const sseStore = connection.select('poke').transform(() => {
-			console.log('poked! pulling fresh data for spaceID', spaceID);
+			// console.log('poked! pulling fresh data for spaceID', spaceID);
 			replicacheInstance.pull();
 		});
 		// The line below is kinda dumb, it prevents Svelte from removing this store at compile time (since it has not subscribers)
@@ -92,7 +87,6 @@
 		return () => {
 			replicacheInstance.close();
 			sseUnsubscribe();
-			undoUnsubscribe();
 			connection.close();
 		};
 	});
@@ -149,7 +143,7 @@
 	}
 
 	function deleteTodo(id: string) {
-		const currentTodo = _list.find((todo) => todo.id === id);
+		const currentTodo = todos.find((todo) => todo.id === id);
 		if (!currentTodo) throw new Error(`Bug! update todo couldn't find todo ${id}`);
 		undoRedoManager.do({
 			scopeName: `delete_todo:${id}`,
@@ -162,7 +156,7 @@
 	}
 
 	function updateTodoText(id: string, newText: string) {
-		const currentTodo = _list.find((todo) => todo.id === id);
+		const currentTodo = todos.find((todo) => todo.id === id);
 		if (!currentTodo) throw new Error(`Bug! update todo couldn't find todo ${id}`);
 
 		if (newText === currentTodo.text) return;
@@ -188,7 +182,7 @@
 	}
 
 	function updateTodoCompleted(id: string, isCompleted: boolean) {
-		const currentTodo = _list.find((todo) => todo.id === id);
+		const currentTodo = todos.find((todo) => todo.id === id);
 		if (!currentTodo) throw new Error(`Bug! update todo couldn't find todo ${id}`);
 		if (isCompleted === currentTodo.completed) return;
 
@@ -213,7 +207,7 @@
 	}
 
 	function setAllCompletion(isCompleted: boolean) {
-		const initialAllIdsList = _list.map((item) => item.id);
+		const initialAllIdsList = todos.map((item) => item.id);
 		const allIds = new Set(initialAllIdsList);
 		// It we keep toggling any remaining items that weren't completed/uncompleted individually (by another user), if no items remain the operation will be removed
 		undoRedoManager.do({
@@ -223,13 +217,13 @@
 			operation: async () => {
 				const currentList = await replicacheInstance.query(listTodos);
 				const remainingItems = currentList
-					.filter((item) => allIds.has(item.id))
-					.filter((item) => item.completed === !isCompleted);
+					.filter((todo) => allIds.has(todo.id))
+					.filter((todo) => todo.completed === !isCompleted);
 				allIds.forEach((id) => allIds.delete(id));
-				remainingItems.forEach((item) => allIds.add(item.id));
-				remainingItems.forEach((item) => {
+				remainingItems.forEach((todo) => allIds.add(todo.id));
+				remainingItems.forEach((todo) => {
 					replicacheInstance.mutate.updateTodo({
-						...item,
+						...todo,
 						updatedBy: mySessionId,
 						completed: isCompleted
 					});
@@ -238,35 +232,34 @@
 			reverseOperation: async () => {
 				const currentList = await replicacheInstance.query(listTodos);
 				const remainingItems = currentList
-					.filter((item) => allIds.has(item.id))
-					.filter((item) => item.completed === isCompleted);
+					.filter((todo) => allIds.has(todo.id))
+					.filter((todo) => todo.completed === isCompleted);
 				allIds.forEach((id) => allIds.delete(id));
-				remainingItems.forEach((item) => allIds.add(item.id));
-				remainingItems.forEach((item) => {
-					replicacheInstance.mutate.updateTodo({ ...item, completed: !isCompleted });
+				remainingItems.forEach((todo) => allIds.add(todo.id));
+				remainingItems.forEach((todo) => {
+					replicacheInstance.mutate.updateTodo({ ...todo, completed: !isCompleted });
 				});
 			},
 			hasUndoConflict: async () => {
 				const currentList = await replicacheInstance.query(listTodos);
 				return (
 					currentList
-						.filter((item) => allIds.has(item.id))
-						.filter((item) => item.completed === isCompleted).length === 0
+						.filter((todo) => allIds.has(todo.id))
+						.filter((todo) => todo.completed === isCompleted).length === 0
 				);
 			},
 			hasRedoConflict: async () => {
 				const currentList = await replicacheInstance.query(listTodos);
 				return (
 					currentList
-						.filter((item) => allIds.has(item.id))
-						.filter((item) => item.completed === !isCompleted).length === 0
+						.filter((todo) => allIds.has(todo.id))
+						.filter((todo) => todo.completed === !isCompleted).length === 0
 				);
 			}
 		});
 	}
 	function deleteAllCompletedTodos() {
-		const originalList = [..._list];
-		const InitialAllIdsList = _list.filter((item) => item.completed).map((item) => item.id);
+		const InitialAllIdsList = todos.filter((todo) => todo.completed).map((todo) => todo.id);
 		const allIds = new Set(InitialAllIdsList);
 		undoRedoManager.do({
 			scopeName: `deleteAllCompleted:${InitialAllIdsList.join(',')}`,
@@ -275,19 +268,19 @@
 			operation: async () => {
 				let currentList = await replicacheInstance.query(listTodos);
 				// if the another session adds or deletes items that's fine, even if they are completed they won't be deleted by a redo
-				currentList = currentList.filter((item) => allIds.has(item.id));
-				currentList.forEach((item) => replicacheInstance.mutate.deleteTodo(item.id));
+				currentList = currentList.filter((todo) => allIds.has(todo.id));
+				currentList.forEach((todo) => replicacheInstance.mutate.deleteTodo(todo.id));
 			},
 			reverseOperation: () => {
-				originalList
-					.filter((item) => allIds.has(item.id))
-					.forEach((item) => replicacheInstance.mutate.unDeleteTodo(item));
+				todos
+					.filter((todo) => allIds.has(todo.id))
+					.forEach((todo) => replicacheInstance.mutate.unDeleteTodo(todo));
 			},
 			hasRedoConflict: async () => {
 				const currentList = await replicacheInstance.query(listTodos);
 				return !!currentList
-					.filter((item) => allIds.has(item.id))
-					.find((item) => item.updatedBy !== mySessionId);
+					.filter((todo) => allIds.has(todo.id))
+					.find((todo) => todo.updatedBy !== mySessionId);
 			}
 		});
 	}
@@ -305,15 +298,13 @@
 
 <p>{areAllChangesSaved ? 'All Data Saved' : 'Sync Pending'}</p>
 
-<UndoRedoBar {canUndoRedo} onUndo={undoRedoManager.undo} onRedo={undoRedoManager.redo} />
+<UndoRedoBar {undoRedoManager} />
 
-<TestSync
-	doOp={undoRedoManager.do}
-	updateCanUndoRedoStatus={undoRedoManager.updateCanUndoRedoStatus}
-/>
+<TestSync {undoRedoManager} />
+
 <section class="todoapp">
 	<TodoMVC
-		items={_list}
+		items={todos}
 		onCreateItem={createTodo}
 		onDeleteItem={deleteTodo}
 		onUpdateItemText={updateTodoText}

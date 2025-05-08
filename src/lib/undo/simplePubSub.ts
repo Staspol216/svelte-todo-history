@@ -1,5 +1,4 @@
 type Callback<T> = (newVal: T) => void;
-type UnsbscribeFunction = () => void;
 
 export function createStore<T>(
 	initialValue: T,
@@ -16,7 +15,7 @@ export function createStore<T>(
 			Array.from(subs).forEach((cb) => cb(_val));
 		},
 
-		subscribe(cb: Callback<T>): UnsbscribeFunction {
+		subscribe(cb: Callback<T>) {
 			subs.add(cb);
 			cb(_val);
 			return () => subs.delete(cb);

@@ -114,16 +114,19 @@ export class UndoManager {
 	}
 
 	async do(undoEntry: UndoEntry) {
-		if (IS_HISTORY_MODE && this._future.length) {
-            // push the entries in revese order and then the opposite operations in the normal order
-			for(let i = this._future.length - 1; i >= 0; i--) {
-                this._past.push({
+		if (IS_HISTORY_MODE && this._future.length > 0) {
+			// push the entries in revese order and then the opposite operations in the normal order
+
+			console.log(this._future, 'this._future');
+			for (let i = this._future.length - 1; i >= 0; i--) {
+				this._past.push({
 					...this._future[i]
 				});
-            }
-            for(let i = 0; i < this._future.length; i++) {
-                const entry = this._future[i];
-                this._past.push({
+			}
+			console.log(this._past, 'this._past');
+			for (let i = 0; i < this._future.length; i++) {
+				const entry = this._future[i];
+				this._past.push({
 					...entry,
 					operation: entry.reverseOperation,
 					reverseOperation: entry.operation,
@@ -132,36 +135,39 @@ export class UndoManager {
 					description: entry.reverseDescription,
 					reverseDescription: entry.description
 				});
-            }
+			}
 		}
 		///
 		this._future = [];
 		try {
 			await this._serialAsyncExecutor.execute(undoEntry.operation);
 			this._past.push(undoEntry);
-		} catch (e) {
+		} catch {
 			console.error(`Faulty do operation: ${undoEntry.scopeName}`);
 		}
 		this._updateCanUndoRedoStatus(CHANGE_REASON.Do);
 	}
 	async undo() {
+		console.log(this._past);
 		const entry = this._past.pop();
 		if (entry === undefined) return;
 		try {
 			await this._serialAsyncExecutor.execute(entry.reverseOperation);
 			this._future.push(entry);
-		} catch (e) {
+		} catch {
 			console.error(`Faulty reverse operation: ${entry.scopeName}`);
 		}
 		this._updateCanUndoRedoStatus(CHANGE_REASON.Undo);
 	}
 	async redo() {
+		console.log(JSON.parse(JSON.stringify(this._future)));
 		const entry = this._future.pop();
+		console.log(entry, 'entry');
 		if (entry === undefined) return;
 		try {
 			await this._serialAsyncExecutor.execute(entry.operation);
 			this._past.push(entry);
-		} catch (e) {
+		} catch {
 			console.error(`Faulty redo operation: ${entry.scopeName}`);
 		}
 		this._updateCanUndoRedoStatus(CHANGE_REASON.Redo);

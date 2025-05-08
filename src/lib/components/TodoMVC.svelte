@@ -6,7 +6,7 @@
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
-	import type { Todo, TodoUpdate } from '$lib/replicache/todo';
+	import type { Todo } from '$lib/replicache/todo';
 
 	const active = (item: Todo) => !item.completed;
 	const completed = (item: Todo) => item.completed;
