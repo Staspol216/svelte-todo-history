@@ -6,7 +6,7 @@ type Queueable = {
 };
 
 // We want to run async operations serially and in order (the promises will resolve in the same order they were queued)
-export function serialAsyncExecutor() {
+export function createSerialAsyncExecutor() {
 	const _queue: Queueable[] = [];
 	let isWorking = false;
 	async function pullFromQueue() {

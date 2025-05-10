@@ -21,14 +21,14 @@
 
 <section class="undo-redo-bar">
 	<button
-		on:click={undoRedoManager.undo}
+		on:click={() => undoRedoManager.undo()}
 		title={canUndoRedo.canUndo ? canUndoRedo.canUndo : ''}
 		disabled={!canUndoRedo.canUndo}
 	>
 		<img src="/undo.svg" alt="Undo Icon" />
 	</button>
 	<button
-		on:click={undoRedoManager.redo}
+		on:click={() => undoRedoManager.redo()}
 		title={canUndoRedo.canRedo ? canUndoRedo.canRedo : ''}
 		disabled={!canUndoRedo.canRedo}
 	>

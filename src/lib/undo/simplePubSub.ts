@@ -1,6 +1,6 @@
 type Callback<T> = (newVal: T) => void;
 
-export function createStore<T>(
+export function createPubSub<T>(
 	initialValue: T,
 	isEqual: (a: T, b: T) => boolean = (a, b) => a === b
 ) {

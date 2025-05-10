@@ -7,7 +7,7 @@
 	const getCurrentCount = () => count;
 	function handleClick() {
 		const frozenCount = count;
-		undoRedoManager.do({
+		undoRedoManager.record({
 			scopeName: 'increaseCount',
 			description: 'increase counter',
 			reverseDescription: 'decrease counter',

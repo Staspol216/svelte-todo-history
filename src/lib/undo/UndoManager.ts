@@ -1,5 +1,5 @@
-import { createStore } from './simplePubSub';
-import { serialAsyncExecutor } from './serialAsyncExecutor';
+import { createPubSub } from './simplePubSub';
+import { createSerialAsyncExecutor } from './serialAsyncExecutor';
 
 export type UndoEntry = {
 	operation: () => void;
@@ -46,138 +46,137 @@ const IS_HISTORY_MODE = true;
  * The consumer is expected to call `updateCanUndoRedoStatus` when external changes that can create conflicts are executed
  ******/
 export class UndoManager {
-	private _past: UndoEntry[] = [];
-	private _future: UndoEntry[] = [];
-	private _pubsub = createStore<UndoRedoStatus>(
-		{
-			canUndo: false,
-			canRedo: false,
-			canUndoChangeReason: CHANGE_REASON.NoChange,
-			canRedoChangeReason: CHANGE_REASON.NoChange
-		},
-		(a, b) =>
-			a.canUndo === b.canUndo &&
-			a.canRedo === b.canRedo &&
-			a.canUndoChangeReason === b.canUndoChangeReason &&
-			a.canRedoChangeReason === b.canRedoChangeReason
-	);
-	private _serialAsyncExecutor = serialAsyncExecutor();
-	constructor() {
-		// public API
-		this.do = this.do.bind(this);
-		this.undo = this.undo.bind(this);
-		this.redo = this.redo.bind(this);
-		this.subscribeToCanUndoRedoChange = this.subscribeToCanUndoRedoChange.bind(this);
-		this.getUndoRedoStatus = this.getUndoRedoStatus.bind(this);
-		this.updateCanUndoRedoStatus = this.updateCanUndoRedoStatus.bind(this);
-	}
+	past: UndoEntry[] = [];
+	future: UndoEntry[] = [];
+	constructor(
+		public pubsub: ReturnType<typeof createPubSub<UndoRedoStatus>>,
+		public serialAsyncExecutor: ReturnType<typeof createSerialAsyncExecutor>
+	) {}
 
-	private isLastIfConflicting(
-		stack: UndoEntry[],
-		getCheck: (entry: UndoEntry) => (() => boolean | Promise<boolean>) | undefined
-	) {
-		const lastIndex = stack.length - 1;
+	private isLastIfConflictingInPast() {
+		const lastIndex = this.past.length - 1;
 		if (lastIndex < 0) return false;
-		const check = getCheck(stack[lastIndex]);
+		const entry = this.past[lastIndex];
+		const check = entry.hasUndoConflict?.bind(entry);
 		if (check === undefined) return false;
-		return this._serialAsyncExecutor.execute(check);
+		return this.serialAsyncExecutor.execute(check);
+	}
+	private isLastIfConflictingInFuture() {
+		const lastIndex = this.future.length - 1;
+		if (lastIndex < 0) return false;
+		const entry = this.future[lastIndex];
+		const check = entry.hasRedoConflict?.bind(entry);
+		if (check === undefined) return false;
+		return this.serialAsyncExecutor.execute(check);
 	}
 	private async removeConflictingEntries() {
-		let isUndoConflict = false,
-			isRedoConflict = false;
-		while (await this.isLastIfConflicting(this._past, (entry) => entry.hasUndoConflict)) {
-			const conflictingEntry = this._past.pop();
+		let isUndoConflict = false;
+		let isRedoConflict = false;
+
+		while (await this.isLastIfConflictingInPast()) {
+			const conflictingEntry = this.past.pop();
 			isUndoConflict = true;
-			this._past = this._past.filter((entry) => entry.scopeName !== conflictingEntry?.scopeName);
+			this.past = this.past.filter((entry) => entry.scopeName !== conflictingEntry?.scopeName);
 		}
-		while (await this.isLastIfConflicting(this._future, (entry) => entry.hasRedoConflict)) {
-			const conflictingEntry = this._future.pop();
+		while (await this.isLastIfConflictingInFuture()) {
+			const conflictingEntry = this.future.pop();
 			isRedoConflict = true;
-			this._future = this._future.filter(
-				(entry) => entry.scopeName !== conflictingEntry?.scopeName
-			);
+			this.future = this.future.filter((entry) => entry.scopeName !== conflictingEntry?.scopeName);
 		}
 		return { isUndoConflict, isRedoConflict };
 	}
 
-	private async _updateCanUndoRedoStatus(changeReason = CHANGE_REASON.NoChange) {
+	async updateCanUndoRedoStatus(changeReason = CHANGE_REASON.NoChange) {
 		const { isUndoConflict, isRedoConflict } = await this.removeConflictingEntries();
-		this._pubsub.set({
-			canUndo: this._past.length > 0 ? this._past[this._past.length - 1].reverseDescription : false,
-			canRedo: this._future.length > 0 ? this._future[this._future.length - 1].description : false,
+		this.pubsub.set({
+			canUndo: this.past.length > 0 ? this.past[this.past.length - 1].reverseDescription : false,
+			canRedo: this.future.length > 0 ? this.future[this.future.length - 1].description : false,
 			canUndoChangeReason: isUndoConflict ? CHANGE_REASON.Conflict : changeReason,
 			canRedoChangeReason: isRedoConflict ? CHANGE_REASON.Conflict : changeReason
 		});
 	}
-	async updateCanUndoRedoStatus() {
-		this._updateCanUndoRedoStatus();
-	}
-
-	async do(undoEntry: UndoEntry) {
-		if (IS_HISTORY_MODE && this._future.length > 0) {
+	async record(undoEntry: UndoEntry) {
+		if (IS_HISTORY_MODE && this.future.length > 0) {
 			// push the entries in revese order and then the opposite operations in the normal order
 
-			console.log(this._future, 'this._future');
-			for (let i = this._future.length - 1; i >= 0; i--) {
-				this._past.push({
-					...this._future[i]
+			console.log(this.future, 'this.future');
+			for (let i = this.future.length - 1; i >= 0; i--) {
+				const entry = this.future[i];
+				this.past.push({
+					...entry,
+					operation: entry.operation.bind(entry),
+					reverseOperation: entry.reverseOperation.bind(entry),
+					hasUndoConflict: entry.hasUndoConflict?.bind(entry),
+					hasRedoConflict: entry.hasRedoConflict?.bind(entry)
 				});
 			}
-			console.log(this._past, 'this._past');
-			for (let i = 0; i < this._future.length; i++) {
-				const entry = this._future[i];
-				this._past.push({
+			console.log(this.past, 'this.past');
+
+			for (let i = 0; i < this.future.length; i++) {
+				const entry = this.future[i];
+				console.log(entry, 'entry');
+				const reversedOperation = {
 					...entry,
-					operation: entry.reverseOperation,
-					reverseOperation: entry.operation,
-					hasUndoConflict: entry.hasRedoConflict,
-					hasRedoConflict: entry.hasUndoConflict,
+					operation: entry.reverseOperation.bind(entry),
+					reverseOperation: entry.operation.bind(entry),
+					hasUndoConflict: entry.hasRedoConflict?.bind(entry),
+					hasRedoConflict: entry.hasUndoConflict?.bind(entry),
 					description: entry.reverseDescription,
 					reverseDescription: entry.description
-				});
+				};
+				console.log(reversedOperation, 'reversedOperation');
+				this.past.push(reversedOperation);
 			}
 		}
-		///
-		this._future = [];
+
+		console.log(this.past);
+		console.log(undoEntry);
+		this.future = [];
 		try {
-			await this._serialAsyncExecutor.execute(undoEntry.operation);
-			this._past.push(undoEntry);
+			await this.serialAsyncExecutor.execute(undoEntry.operation.bind(undoEntry));
+			this.past.push(undoEntry);
 		} catch {
 			console.error(`Faulty do operation: ${undoEntry.scopeName}`);
 		}
-		this._updateCanUndoRedoStatus(CHANGE_REASON.Do);
+
+		console.log(this.past, 'this.pastthis.pastthis.pastthis.past');
+		this.updateCanUndoRedoStatus(CHANGE_REASON.Do);
 	}
 	async undo() {
-		console.log(this._past);
-		const entry = this._past.pop();
+		console.log(this);
+		const entry = this.past.pop();
 		if (entry === undefined) return;
+		console.log(entry);
+		console.log(entry.reverseOperation);
 		try {
-			await this._serialAsyncExecutor.execute(entry.reverseOperation);
-			this._future.push(entry);
-		} catch {
+			await this.serialAsyncExecutor.execute(entry.reverseOperation.bind(entry));
+			this.future.push(entry);
+		} catch (e) {
 			console.error(`Faulty reverse operation: ${entry.scopeName}`);
+			console.error(e);
 		}
-		this._updateCanUndoRedoStatus(CHANGE_REASON.Undo);
+		this.updateCanUndoRedoStatus(CHANGE_REASON.Undo);
 	}
 	async redo() {
-		console.log(JSON.parse(JSON.stringify(this._future)));
-		const entry = this._future.pop();
+		console.log(JSON.parse(JSON.stringify(this.future)));
+		const entry = this.future.pop();
 		console.log(entry, 'entry');
 		if (entry === undefined) return;
 		try {
-			await this._serialAsyncExecutor.execute(entry.operation);
-			this._past.push(entry);
-		} catch {
+			await this.serialAsyncExecutor.execute(entry.operation.bind(entry));
+			this.past.push(entry);
+		} catch (e) {
 			console.error(`Faulty redo operation: ${entry.scopeName}`);
+			console.error(e);
 		}
-		this._updateCanUndoRedoStatus(CHANGE_REASON.Redo);
+		this.updateCanUndoRedoStatus(CHANGE_REASON.Redo);
 	}
 
 	subscribeToCanUndoRedoChange(callback: CallbackFunction) {
-		return this._pubsub.subscribe(callback);
+		return this.pubsub.subscribe(callback);
 	}
 
 	getUndoRedoStatus(): UndoRedoStatus {
-		return { ...this._pubsub.get() };
+		return { ...this.pubsub.get() };
 	}
 }
